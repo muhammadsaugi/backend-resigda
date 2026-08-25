@@ -74,11 +74,26 @@ class AdminController extends Controller
             'status' => ['nullable', 'in:berlaku,dicabut,diubah'],
             'tags' => ['nullable', 'array'],
             'ringkasan' => ['nullable', 'string'],
+            'articles' => ['nullable', 'array'],
+            'articles.*.nomor_pasal' => ['required_with:articles', 'string'],
+            'articles.*.isi' => ['required_with:articles', 'string'],
         ]);
+
+        $articlesData = $validated['articles'] ?? null;
+        unset($validated['articles']);
 
         $regulation = Regulation::create($validated);
 
-        return response()->json($regulation, 201);
+        if (! empty($articlesData)) {
+            foreach ($articlesData as $art) {
+                $regulation->articles()->create([
+                    'nomor_pasal' => $art['nomor_pasal'],
+                    'isi' => $art['isi'],
+                ]);
+            }
+        }
+
+        return response()->json($regulation->load('articles'), 201);
     }
 
     /**
@@ -96,11 +111,46 @@ class AdminController extends Controller
             'status' => ['sometimes', 'in:berlaku,dicabut,diubah'],
             'tags' => ['nullable', 'array'],
             'ringkasan' => ['nullable', 'string'],
+            'articles' => ['nullable', 'array'],
+            'articles.*.nomor_pasal' => ['required_with:articles', 'string'],
+            'articles.*.isi' => ['required_with:articles', 'string'],
         ]);
+
+        $articlesData = $validated['articles'] ?? null;
+        unset($validated['articles']);
 
         $regulation->update($validated);
 
-        return response()->json($regulation);
+        if ($articlesData !== null) {
+            $regulation->articles()->delete();
+            foreach ($articlesData as $art) {
+                $regulation->articles()->create([
+                    'nomor_pasal' => $art['nomor_pasal'],
+                    'isi' => $art['isi'],
+                ]);
+            }
+        }
+
+        return response()->json($regulation->load('articles'));
+    }
+
+    /**
+     * DELETE /api/admin/regulations/{id}
+     */
+    public function destroyRegulation(Regulation $regulation): JsonResponse
+    {
+        $regulation->embeddings()->delete();
+        $regulation->articles()->delete();
+        $regulation->relationsAsSource()->delete();
+        $regulation->relationsAsTarget()->delete();
+
+        if ($regulation->file_path && Storage::disk('public')->exists($regulation->file_path)) {
+            Storage::disk('public')->delete($regulation->file_path);
+        }
+
+        $regulation->delete();
+
+        return response()->json(['message' => 'Regulasi berhasil dihapus']);
     }
 
     /**

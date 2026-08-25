@@ -10,10 +10,15 @@ class ClaimVerification extends Model
         'session_id',
         'citizen_id',
         'klaim_text',
+        'foto_bukti',
         'hasil_verifikasi',
         'regulation_ids',
         'kecamatan',
         'layanan',
+        'kategori_laporan',
+        'dilaporkan_ke_inspektorat',
+        'catatan_laporan',
+        'status_audit',
     ];
 
     public function citizen()
@@ -23,5 +28,6 @@ class ClaimVerification extends Model
 
     protected $casts = [
         'regulation_ids' => 'array',
+        'dilaporkan_ke_inspektorat' => 'boolean',
     ];
 }

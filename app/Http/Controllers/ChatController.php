@@ -26,7 +26,7 @@ class ChatController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'query' => ['required', 'string', 'min:3', 'max:1000'],
+            'query' => ['required', 'string', 'min:3', 'max:500'],
             'session_id' => ['required', 'uuid'],
         ]);
 
@@ -51,7 +51,7 @@ class ChatController extends Controller
         // confidence, dan timestamp. TIDAK PERNAH simpan $validated['query'] di sini.
         CivicInteraction::create([
             'session_id' => $validated['session_id'],
-            'citizen_id' => $request->user('sanctum')?->id,
+            'citizen_id' => $request->user('sanctum') instanceof \App\Models\Citizen ? $request->user('sanctum')->id : null,
             'topic' => $result['topic'] ?? null,       // masih null sampai Fase 5 (/classify)
             'sentiment' => $result['sentiment'] ?? null, // masih null sampai Fase 5
             'regulation_ids' => $regulationIds,

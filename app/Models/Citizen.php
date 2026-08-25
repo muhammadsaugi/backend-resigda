@@ -14,6 +14,9 @@ class Citizen extends Authenticatable
     protected $fillable = [
         'name',
         'email',
+        'google_id',
+        'phone_number',
+        'avatar',
         'password',
     ];
 

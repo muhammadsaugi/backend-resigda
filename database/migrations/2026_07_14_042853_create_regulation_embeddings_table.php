@@ -33,10 +33,6 @@ return new class extends Migration
         // Tambah kolom vector via raw SQL
         DB::statement('ALTER TABLE regulation_embeddings ADD COLUMN embedding vector(768)');
 
-        DB::statement('CREATE INDEX regulation_embeddings_embedding_idx
-            ON regulation_embeddings
-            USING ivfflat (embedding vector_cosine_ops)
-            WITH (lists = 100)');
     }
 
     public function down(): void

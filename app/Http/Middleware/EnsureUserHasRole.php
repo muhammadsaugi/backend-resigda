@@ -17,8 +17,10 @@ class EnsureUserHasRole
     {
         $user = $request->user();
 
-        if (! $user) {
-            return response()->json(['message' => 'Unauthenticated.'], 401);
+        if (! $user || ! ($user instanceof \App\Models\User)) {
+            return response()->json([
+                'message' => 'Akses ditolak. Halaman admin hanya diperuntukkan bagi ASN Pemkab Sidoarjo.',
+            ], 403);
         }
 
         if (! $user->is_active) {

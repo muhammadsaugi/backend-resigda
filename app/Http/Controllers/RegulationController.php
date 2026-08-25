@@ -18,7 +18,7 @@ class RegulationController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Regulation::query();
+        $query = Regulation::withCount('embeddings');
 
         if ($request->filled('search')) {
             $keyword = $request->string('search');
@@ -39,20 +39,41 @@ class RegulationController extends Controller
         $perPage = (int) $request->input('per_page', 10);
         $regulations = $query->orderByDesc('tanggal_terbit')->paginate($perPage);
 
+        $regulations->getCollection()->transform(function ($reg) {
+            $reg->has_pdf = !empty($reg->file_path);
+            $reg->pdf_url = $reg->file_path ? asset('storage/' . ltrim($reg->file_path, '/')) : null;
+            return $reg;
+        });
+
         return response()->json($regulations);
     }
 
     /**
      * GET /api/regulations/{regulation}
-     * Sertakan pasal-pasal utama. Relasi graf (regulation_relations)
-     * belum ada di fase ini — akan ditambahkan di Fase 6.
+     * Sertakan pasal-pasal utama, ringkasan fallback, dan info PDF.
      */
     public function show(Regulation $regulation): JsonResponse
     {
-        $regulation->load('articles');
+        $regulation->load(['articles', 'embeddings:id,regulation_id,content_chunk']);
 
-        // Tambah counter "jumlah_dilihat" — dipakai Decay Tracker nanti (Fase 6)
+        // Incremental views count for Decay Tracker
         $regulation->increment('jumlah_dilihat');
+
+        // Fallback hierarchy for content_summary:
+        // 1. $regulation->ringkasan (if present)
+        // 2. First chunk of regulation_embeddings (if ringkasan empty)
+        // 3. Articles snippet (if articles present)
+        $firstChunk = $regulation->embeddings->first()?->content_chunk;
+        $contentSummary = $regulation->ringkasan;
+
+        if (empty($contentSummary) && !empty($firstChunk)) {
+            $contentSummary = $firstChunk;
+        }
+
+        $regulation->content_summary = $contentSummary;
+        $regulation->has_pdf = !empty($regulation->file_path);
+        $regulation->pdf_url = $regulation->file_path ? asset('storage/' . ltrim($regulation->file_path, '/')) : null;
+        $regulation->embedding_count = $regulation->embeddings->count();
 
         return response()->json($regulation);
     }

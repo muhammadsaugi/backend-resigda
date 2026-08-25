@@ -20,15 +20,20 @@ use Illuminate\Support\Facades\Route;
 
 Route::post('/chat', [ChatController::class, 'store']);
 Route::post('/verify-claim', [ClaimVerificationController::class, 'store']);
+Route::post('/verify-claim/{claimVerification}/report', [ClaimVerificationController::class, 'reportToInspektorat']);
 
 Route::get('/regulations', [RegulationController::class, 'index']);
 Route::get('/regulations/{regulation}', [RegulationController::class, 'show']);
 Route::get('/regulations/{regulation}/relations', [RegulationController::class, 'relations']);
+Route::get('/public/stats', [CivicIntelligenceController::class, 'publicStats']);
 
 // ==================== Auth Warga ====================
 
-Route::post('/citizen/register', [CitizenAuthController::class, 'register']);
-Route::post('/citizen/login', [CitizenAuthController::class, 'login']);
+Route::middleware('throttle:6,1')->group(function () {
+    Route::post('/citizen/register', [CitizenAuthController::class, 'register']);
+    Route::post('/citizen/login', [CitizenAuthController::class, 'login']);
+    Route::post('/citizen/google-auth', [CitizenAuthController::class, 'googleAuth']);
+});
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/citizen/logout', [CitizenAuthController::class, 'logout']);
     Route::get('/citizen/me', [CitizenAuthController::class, 'me']);
@@ -36,7 +41,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
 // ==================== Auth ASN ====================
 
-Route::post('/auth/login', [AuthController::class, 'login']);
+Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:6,1');
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me', [AuthController::class, 'me']);
@@ -63,6 +68,7 @@ Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
     Route::middleware('role:bagian_hukum')->group(function () {
         Route::post('/regulations', [AdminController::class, 'storeRegulation']);
         Route::put('/regulations/{regulation}', [AdminController::class, 'updateRegulation']);
+        Route::delete('/regulations/{regulation}', [AdminController::class, 'destroyRegulation']);
         Route::post('/regulations/{regulation}/embed', [AdminController::class, 'embedRegulation']);
         Route::post('/regulations/{regulation}/upload-pdf', [AdminController::class, 'uploadPdf']);
         Route::post('/relations', [AdminController::class, 'storeRelation']);
@@ -74,5 +80,6 @@ Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
     Route::middleware('role:inspektorat')->group(function () {
         Route::get('/inspektorat/pungli-heatmap', [InspektoratController::class, 'pungliHeatmap']);
         Route::get('/inspektorat/claim-history', [InspektoratController::class, 'claimHistory']);
+        Route::patch('/inspektorat/claims/{claimVerification}/status', [InspektoratController::class, 'updateClaimStatus']);
     });
 });

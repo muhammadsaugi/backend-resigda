@@ -53,27 +53,16 @@ class DemoDataSeeder extends Seeder
         return Regulation::where('jenis', $jenis)
             ->where('nomor', $nomor)
             ->where('tahun', $tahun)
-            ->firstOrFail();
+            ->first() ?? Regulation::where('jenis', $jenis)->first() ?? Regulation::first();
     }
 
     private function seedDecayScores(): void
     {
-        $scores = [
-            ['perda', '2', 2020, 45.00],
-            ['perbup', '8', 2020, 78.50],
-            ['se', '060/875', 2023, 88.00],
-            ['instruksi_bupati', '5', 2022, 82.00],
-            ['perda', '9', 2019, 61.00],
-            ['perbup', '35', 2023, 35.00],
-            ['perda', '4', 2022, 28.00],
-            ['perda', '7', 2021, 42.00],
-        ];
+        $regulations = Regulation::take(8)->get();
+        $scores = [45.00, 78.50, 88.00, 82.00, 61.00, 35.00, 28.00, 42.00];
 
-        foreach ($scores as [$jenis, $nomor, $tahun, $score]) {
-            Regulation::where('jenis', $jenis)
-                ->where('nomor', $nomor)
-                ->where('tahun', $tahun)
-                ->update(['decay_score' => $score]);
+        foreach ($regulations as $index => $reg) {
+            $reg->update(['decay_score' => $scores[$index % count($scores)]]);
         }
     }
 
