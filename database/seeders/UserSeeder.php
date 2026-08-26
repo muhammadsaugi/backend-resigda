@@ -38,10 +38,24 @@ class UserSeeder extends Seeder
             ],
         ];
 
+        // KEAMANAN: Gunakan USER_SEEDER_PASSWORD di file .env VPS produksi.
+        // Di local, fallback ke 'password123' untuk kemudahan development.
+        // Di produksi, jika env var tidak di-set, seeder TIDAK boleh berjalan
+        // dengan password lemah — akan throw exception.
+        $seedPassword = env('USER_SEEDER_PASSWORD');
+        if (! $seedPassword) {
+            if (app()->environment('production')) {
+                throw new \RuntimeException(
+                    'USER_SEEDER_PASSWORD harus di-set di .env sebelum menjalankan seeder di produksi.'
+                );
+            }
+            $seedPassword = 'password123'; // hanya untuk local/testing
+        }
+
         foreach ($users as $userData) {
             User::create([
                 ...$userData,
-                'password' => Hash::make('password123'), // GANTI sebelum produksi
+                'password' => Hash::make($seedPassword),
                 'is_active' => true,
                 'email_verified_at' => now(),
             ]);

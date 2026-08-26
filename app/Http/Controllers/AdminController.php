@@ -196,7 +196,10 @@ class AdminController extends Controller
      */
     public function recalculateDecay(Request $request): JsonResponse
     {
-        $threshold = $request->input('threshold', 70);
+        $validated = $request->validate([
+            'threshold' => ['sometimes', 'integer', 'min:0', 'max:100'],
+        ]);
+        $threshold = $validated['threshold'] ?? 70;
 
         \Illuminate\Support\Facades\Artisan::call('regsida:calculate-decay', [
             '--threshold' => $threshold,
@@ -454,7 +457,11 @@ class AdminController extends Controller
      */
     public function exportReport(Request $request)
     {
-        $bulan = $request->input('bulan', now()->format('Y-m'));
+        // Validasi format YYYY-MM untuk mencegah path traversal di nama file download.
+        $validated = $request->validate([
+            'bulan' => ['sometimes', 'string', 'regex:/^\d{4}-\d{2}$/'],
+        ]);
+        $bulan = $validated['bulan'] ?? now()->format('Y-m');
 
         $aggregations = CivicAggregation::whereRaw("to_char(periode, 'YYYY-MM') = ?", [$bulan])
             ->orderBy('topic')

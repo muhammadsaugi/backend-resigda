@@ -23,6 +23,9 @@ class SecurityHeaders
         $response->headers->set('X-Content-Type-Options', 'nosniff');
         $response->headers->set('Referrer-Policy', 'strict-origin-when-cross-origin');
         $response->headers->set('Content-Security-Policy', "frame-ancestors 'none'");
+        // Batasi akses browser API yang tidak dipakai aplikasi ini
+        $response->headers->set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+        $response->headers->set('X-DNS-Prefetch-Control', 'off');
 
         return $response;
     }
