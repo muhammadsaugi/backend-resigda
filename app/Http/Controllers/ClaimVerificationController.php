@@ -42,15 +42,21 @@ class ClaimVerificationController extends Controller
             $extension = strtolower($file->getClientOriginalExtension());
             $filename = 'bukti_' . Str::uuid() . '.' . $extension;
             $path = $file->storeAs('bukti_klaim', $filename, 'public');
-
-            // Strip EXIF metadata if image is JPEG/JPG to protect whistleblower GPS/camera identity
             $fullPath = Storage::disk('public')->path($path);
-            if (in_array($extension, ['jpg', 'jpeg']) && function_exists('imagecreatefromjpeg')) {
-                @$img = imagecreatefromjpeg($fullPath);
-                if ($img) {
-                    imagejpeg($img, $fullPath, 90);
-                    imagedestroy($img);
-                }
+
+            // Re-encode lewat GD untuk SEMUA format yang diterima (dulu cuma JPEG).
+            // Ini membuang EXIF/GPS demi anonimitas pelapor, SEKALIGUS menetralkan
+            // payload apa pun yang disisipkan/di-append di belakang data gambar asli
+            // (mis. byte tambahan setelah IEND pada PNG, atau trailer RIFF pada WEBP)
+            // karena GD cuma membaca ulang piksel gambarnya, bukan byte mentah file.
+            // Kalau file gagal didekode sebagai gambar asli meski lolos validasi mimes
+            // (indikasi bukan gambar sungguhan/polyglot), tolak — jangan simpan mentah.
+            if (! $this->reencodeImage($fullPath, $extension)) {
+                Storage::disk('public')->delete($path);
+
+                return response()->json([
+                    'message' => 'File yang diunggah tidak dapat diproses sebagai gambar yang valid. Coba unggah ulang foto dalam format JPG, PNG, atau WEBP.',
+                ], 422);
             }
 
             $fotoBuktiUrl = Storage::url($path);
@@ -100,6 +106,14 @@ class ClaimVerificationController extends Controller
      * POST /api/verify-claim/{claimVerification}/report
      * Laporkan klaim tanpa dasar hukum / indikasi pungli langsung ke Inspektorat.
      * Mengizinkan pelaporan anonim jika foto_bukti disertakan atau is_anonymous = true.
+     *
+     * KEAMANAN: {claimVerification} di-resolve dari ID berurutan biasa lewat route
+     * model binding — tanpa pengecekan kepemilikan, siapa pun bisa menebak ID kecil
+     * berurutan dan menandai/mengubah catatan laporan milik warga lain (IDOR).
+     * Sekarang wajib membuktikan kepemilikan via session_id yang sama dipakai saat
+     * klaim ini pertama kali dibuat (disimpan di localStorage browser pelapor —
+     * pola yang sama seperti privacy-by-design session_id di seluruh aplikasi ini),
+     * atau lewat citizen_id kalau klaim itu dibuat saat sudah login.
      */
     public function reportToInspektorat(Request $request, ClaimVerification $claimVerification): JsonResponse
     {
@@ -115,9 +129,19 @@ class ClaimVerificationController extends Controller
         }
 
         $validated = $request->validate([
+            'session_id' => ['required', 'uuid'],
             'catatan_laporan' => ['nullable', 'string', 'max:500'],
             'kategori_laporan' => ['nullable', 'in:pungli_petugas,usul_regulasi'],
         ]);
+
+        $isOwner = $validated['session_id'] === $claimVerification->session_id
+            || ($citizenUser instanceof \App\Models\Citizen && $citizenUser->id === $claimVerification->citizen_id);
+
+        if (! $isOwner) {
+            return response()->json([
+                'message' => 'Klaim ini tidak ditemukan pada sesi Anda.',
+            ], 403);
+        }
 
         $kategori = $validated['kategori_laporan'] ?? 'pungli_petugas';
         $prefix = $hasFotoBukti ? '[DILENGKAPI FOTO BUKTI ANONIM] ' : '';
@@ -128,7 +152,7 @@ class ClaimVerificationController extends Controller
         $claimVerification->update([
             'dilaporkan_ke_inspektorat' => true,
             'kategori_laporan' => $kategori,
-            'catatan_laporan' => $validated['catatan_laporan'] ? ($prefix . $validated['catatan_laporan']) : $defaultNote,
+            'catatan_laporan' => ! empty($validated['catatan_laporan']) ? ($prefix . $validated['catatan_laporan']) : $defaultNote,
             'status_audit' => 'baru',
         ]);
 
@@ -140,5 +164,39 @@ class ClaimVerificationController extends Controller
             'message' => $msg,
             'data' => $claimVerification,
         ]);
+    }
+
+    /**
+     * Dekode file gambar lewat GD lalu tulis ulang di tempat yang sama sebagai
+     * data piksel murni (bukan salinan byte mentah). Sengaja dipakai untuk semua
+     * format yang diterima (jpg/jpeg/png/webp) — bukan cuma JPEG seperti
+     * sebelumnya — supaya foto bukti anonim tidak pernah menyimpan byte apa pun
+     * dari file asli yang tidak benar-benar bagian dari gambar (EXIF/GPS,
+     * maupun data tersembunyi yang di-append di belakang gambar/"polyglot").
+     * Return false kalau file gagal didekode sebagai gambar sungguhan.
+     */
+    private function reencodeImage(string $fullPath, string $extension): bool
+    {
+        $image = match ($extension) {
+            'jpg', 'jpeg' => function_exists('imagecreatefromjpeg') ? @imagecreatefromjpeg($fullPath) : false,
+            'png' => function_exists('imagecreatefrompng') ? @imagecreatefrompng($fullPath) : false,
+            'webp' => function_exists('imagecreatefromwebp') ? @imagecreatefromwebp($fullPath) : false,
+            default => false,
+        };
+
+        if (! $image) {
+            return false;
+        }
+
+        $success = match ($extension) {
+            'jpg', 'jpeg' => imagejpeg($image, $fullPath, 90),
+            'png' => imagepng($image, $fullPath, 6),
+            'webp' => function_exists('imagewebp') ? imagewebp($image, $fullPath, 90) : false,
+            default => false,
+        };
+
+        imagedestroy($image);
+
+        return $success;
     }
 }

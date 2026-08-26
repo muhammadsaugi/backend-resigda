@@ -15,10 +15,23 @@ use RuntimeException;
 class AIService
 {
     protected string $baseUrl;
+    protected string $internalToken;
 
     public function __construct()
     {
         $this->baseUrl = rtrim(config('services.ai_service.url'), '/');
+        $this->internalToken = (string) config('services.ai_service.internal_token');
+    }
+
+    /**
+     * Http::withHeaders(...) yang sudah dibekali token internal — ai-service
+     * sekarang menolak semua request tanpa header ini (lihat main.py di
+     * ai-service), supaya kalau portnya pernah kebuka langsung ke luar, orang
+     * tidak bisa memanggilnya tanpa lewat Laravel sama sekali.
+     */
+    protected function http()
+    {
+        return Http::withHeaders(['X-Internal-Token' => $this->internalToken]);
     }
 
     /**
@@ -29,7 +42,7 @@ class AIService
     public function askRag(string $query, int $topK = 5): array
     {
         try {
-            $response = Http::timeout(30)
+            $response = $this->http()->timeout(30)
                 ->retry(2, 500) // coba lagi 2x kalau timeout/gagal koneksi sesaat
                 ->post("{$this->baseUrl}/rag", [
                     'query' => $query,
@@ -62,7 +75,7 @@ class AIService
             // ini sering dilakukan berkali-kali berurutan (upload PDF banyak chunk),
             // dan tiap panggilan bisa tertahan antrian rate limiter Gemini di
             // ai-service sebelum benar-benar terkirim.
-            $response = Http::timeout(60)->post("{$this->baseUrl}/embed", [
+            $response = $this->http()->timeout(60)->post("{$this->baseUrl}/embed", [
                 'regulation_id' => $regulationId,
                 'content' => $content,
                 'article_id' => $articleId,
@@ -77,6 +90,34 @@ class AIService
         } catch (ConnectionException $e) {
             throw new RuntimeException(
                 'Tidak bisa terhubung ke AI service untuk embedding.',
+                previous: $e
+            );
+        }
+    }
+
+    /**
+     * Panggil POST /detect-relations di FastAPI — mesin deteksi relasi/konflik
+     * antar regulasi untuk Conflict Graph Engine. Timeout dinaikkan karena
+     * tiap kandidat pasangan regulasi butuh satu panggilan LLM terpisah.
+     */
+    public function detectRelations(?int $regulationId = null, int $limit = 15, float $maxDistance = 0.35): array
+    {
+        try {
+            $response = $this->http()->timeout(120)->post("{$this->baseUrl}/detect-relations", [
+                'regulation_id' => $regulationId,
+                'limit' => $limit,
+                'max_distance' => $maxDistance,
+            ]);
+
+            $response->throw();
+
+            return $response->json();
+        } catch (RequestException $e) {
+            $detail = $e->response->json('detail') ?? $e->getMessage();
+            throw new RuntimeException("Gagal deteksi relasi: {$detail}", previous: $e);
+        } catch (ConnectionException $e) {
+            throw new RuntimeException(
+                'Tidak bisa terhubung ke AI service untuk deteksi relasi.',
                 previous: $e
             );
         }

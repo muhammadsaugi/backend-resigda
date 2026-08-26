@@ -39,6 +39,13 @@ class AdminController extends Controller
                 ->whereMonth('interacted_at', now()->month)
                 ->whereYear('interacted_at', now()->year)
                 ->count(),
+            // Dipakai dasbor Inspektorat (ringkasan cepat pengaduan warga, terlepas dari
+            // metrik regulasi/hukum di atas yang bukan domain kewenangan mereka).
+            'total_klaim_diverifikasi' => \App\Models\ClaimVerification::count(),
+            'indikasi_pungli_dilaporkan' => \App\Models\ClaimVerification::where('dilaporkan_ke_inspektorat', true)
+                ->where('kategori_laporan', 'pungli_petugas')->count(),
+            'klaim_belum_ditindak' => \App\Models\ClaimVerification::where('dilaporkan_ke_inspektorat', true)
+                ->where('status_audit', 'baru')->count(),
         ]);
     }
 
@@ -176,6 +183,97 @@ class AdminController extends Controller
         }
 
         return response()->json($result);
+    }
+
+    // ==================== Decay Tracker — Hitung Ulang Manual ====================
+
+    /**
+     * POST /api/admin/decay/recalculate
+     * Role: bagian_hukum. Trigger manual untuk `regsida:calculate-decay`
+     * (yang normalnya berjalan otomatis tiap malam lewat scheduler) —
+     * dipakai staf/demo supaya tidak perlu menunggu sampai jadwal malam
+     * untuk melihat efek data interaksi warga terbaru pada decay score.
+     */
+    public function recalculateDecay(Request $request): JsonResponse
+    {
+        $threshold = $request->input('threshold', 70);
+
+        \Illuminate\Support\Facades\Artisan::call('regsida:calculate-decay', [
+            '--threshold' => $threshold,
+        ]);
+
+        return response()->json([
+            'message' => 'Decay score berhasil dihitung ulang.',
+            'output' => trim(\Illuminate\Support\Facades\Artisan::output()),
+        ]);
+    }
+
+    // ==================== Conflict Graph — Deteksi Otomatis ====================
+
+    /**
+     * POST /api/admin/relations/detect
+     * Role: bagian_hukum. Menjalankan mesin deteksi relasi/konflik nyata:
+     * 1) ai-service cari pasangan regulasi dengan embedding paling mirip (kandidat)
+     * 2) tiap kandidat dinilai LLM: jenis relasi + confidence + alasan (dikutip dari isi pasal)
+     * 3) hasil disimpan dengan status_tinjau=belum_ditinjau — TETAP butuh validasi
+     *    manual staf lewat PATCH /relations/{id}, AI di sini hanya mengusulkan.
+     * Kalau `regulation_id` diisi di body, hanya scan kandidat yang melibatkan
+     * regulasi itu (dipakai tombol "Deteksi Ulang" di halaman detail regulasi).
+     */
+    public function detectRelations(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'regulation_id' => ['nullable', 'integer', 'exists:regulations,id'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:50'],
+            'max_distance' => ['nullable', 'numeric', 'min:0', 'max:1'],
+        ]);
+
+        try {
+            $result = $this->aiService->detectRelations(
+                $validated['regulation_id'] ?? null,
+                $validated['limit'] ?? 15,
+                $validated['max_distance'] ?? 0.35,
+            );
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 502);
+        }
+
+        $disimpan = 0;
+        $dilewati = 0;
+
+        foreach ($result['relasi_ditemukan'] ?? [] as $found) {
+            // Lewati kalau relasi jenis yang sama antara pasangan regulasi ini
+            // sudah ada (searah atau berlawanan arah) dan belum ditolak —
+            // supaya "deteksi ulang" tidak menumpuk duplikat tiap kali diklik.
+            $sudahAda = RegulationRelation::where('jenis_relasi', $found['jenis_relasi'])
+                ->where('status_tinjau', '!=', 'ditolak')
+                ->where(function ($q) use ($found) {
+                    $q->where(fn ($q2) => $q2->where('source_id', $found['source_id'])->where('target_id', $found['target_id']))
+                        ->orWhere(fn ($q2) => $q2->where('source_id', $found['target_id'])->where('target_id', $found['source_id']));
+                })
+                ->exists();
+
+            if ($sudahAda) {
+                $dilewati++;
+                continue;
+            }
+
+            RegulationRelation::create([
+                'source_id' => $found['source_id'],
+                'target_id' => $found['target_id'],
+                'jenis_relasi' => $found['jenis_relasi'],
+                'confidence' => $found['confidence'],
+                'alasan' => $found['alasan'],
+                'status_tinjau' => 'belum_ditinjau',
+            ]);
+            $disimpan++;
+        }
+
+        return response()->json([
+            'kandidat_diperiksa' => $result['kandidat_diperiksa'] ?? 0,
+            'relasi_baru_disimpan' => $disimpan,
+            'relasi_dilewati_duplikat' => $dilewati,
+        ]);
     }
 
     // ==================== Conflict Graph — Validasi Relasi ====================

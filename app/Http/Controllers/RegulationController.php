@@ -36,7 +36,9 @@ class RegulationController extends Controller
             $query->where('status', $request->string('status'));
         }
 
-        $perPage = (int) $request->input('per_page', 10);
+        // Klem per_page supaya tidak bisa diminta ukuran raksasa (mis. ?per_page=999999)
+        // yang memaksa COUNT + fetch besar berulang-ulang pada endpoint publik tanpa login.
+        $perPage = max(1, min(100, (int) $request->input('per_page', 10)));
         $regulations = $query->orderByDesc('tanggal_terbit')->paginate($perPage);
 
         $regulations->getCollection()->transform(function ($reg) {

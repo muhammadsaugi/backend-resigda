@@ -8,6 +8,7 @@ use App\Http\Controllers\CivicIntelligenceController;
 use App\Http\Controllers\ClaimVerificationController;
 use App\Http\Controllers\InspektoratController;
 use App\Http\Controllers\RegulationController;
+use App\Http\Controllers\VerifikasiKlaimController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -18,14 +19,23 @@ use Illuminate\Support\Facades\Route;
 
 // ==================== Portal Warga (publik, tanpa login) ====================
 
-Route::post('/chat', [ChatController::class, 'store']);
-Route::post('/verify-claim', [ClaimVerificationController::class, 'store']);
-Route::post('/verify-claim/{claimVerification}/report', [ClaimVerificationController::class, 'reportToInspektorat']);
+// /chat dan /verify-claim masing-masing memicu panggilan LLM berbayar (embedding +
+// generation + classification) ke ai-service, jadi dibatasi dua lapis: per-menit
+// (mencegah flood cepat) dan per-hari (mencegah biaya membengkak dari script yang
+// sabar mengirim request pelan-pelan tapi terus-menerus sepanjang hari).
+Route::post('/chat', [ChatController::class, 'store'])
+    ->middleware(['throttle:10,1', 'throttle:100,1440']);
+Route::post('/verify-claim', [ClaimVerificationController::class, 'store'])
+    ->middleware(['throttle:10,1', 'throttle:100,1440']);
+Route::post('/verify-claim/{claimVerification}/report', [ClaimVerificationController::class, 'reportToInspektorat'])
+    ->middleware('throttle:20,1');
 
-Route::get('/regulations', [RegulationController::class, 'index']);
-Route::get('/regulations/{regulation}', [RegulationController::class, 'show']);
-Route::get('/regulations/{regulation}/relations', [RegulationController::class, 'relations']);
-Route::get('/public/stats', [CivicIntelligenceController::class, 'publicStats']);
+Route::middleware('throttle:60,1')->group(function () {
+    Route::get('/regulations', [RegulationController::class, 'index']);
+    Route::get('/regulations/{regulation}', [RegulationController::class, 'show']);
+    Route::get('/regulations/{regulation}/relations', [RegulationController::class, 'relations']);
+});
+Route::get('/public/stats', [CivicIntelligenceController::class, 'publicStats'])->middleware('throttle:30,1');
 
 // ==================== Auth Warga ====================
 
@@ -64,6 +74,11 @@ Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
         Route::get('/reports/export', [AdminController::class, 'exportReport']);
     });
 
+    // Verifikasi Klaim: dasbor monitoring laporan warga (pungli & usulan regulasi), ketiga role.
+    Route::middleware('role:staf_opd,bagian_hukum,inspektorat')->group(function () {
+        Route::get('/verifikasi-klaim', [VerifikasiKlaimController::class, 'index']);
+    });
+
     // Manajemen regulasi, validasi relasi graf, closed-loop revisi: Bagian Hukum saja
     Route::middleware('role:bagian_hukum')->group(function () {
         Route::post('/regulations', [AdminController::class, 'storeRegulation']);
@@ -72,8 +87,10 @@ Route::middleware(['auth:sanctum'])->prefix('admin')->group(function () {
         Route::post('/regulations/{regulation}/embed', [AdminController::class, 'embedRegulation']);
         Route::post('/regulations/{regulation}/upload-pdf', [AdminController::class, 'uploadPdf']);
         Route::post('/relations', [AdminController::class, 'storeRelation']);
+        Route::post('/relations/detect', [AdminController::class, 'detectRelations']);
         Route::patch('/relations/{relation}', [AdminController::class, 'validateRelation']);
         Route::patch('/revisions/{revision}', [AdminController::class, 'updateRevisionStatus']);
+        Route::post('/decay/recalculate', [AdminController::class, 'recalculateDecay']);
     });
 
     // Dasbor Inspektorat pungli: Inspektorat saja.

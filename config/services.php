@@ -36,6 +36,13 @@ return [
     ],
     'ai_service' => [
     'url' => env('AI_SERVICE_URL', 'http://localhost:8000'),
+    'internal_token' => env('AI_SERVICE_INTERNAL_TOKEN'),
 ],
+
+    'google' => [
+        // Dipakai backend untuk verifikasi signature JWT ID Token Google Identity
+        // Services (harus sama dengan VITE_GOOGLE_CLIENT_ID di frontend/.env).
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+    ],
 
 ];

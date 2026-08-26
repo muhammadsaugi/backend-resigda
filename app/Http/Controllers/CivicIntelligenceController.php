@@ -72,18 +72,11 @@ class CivicIntelligenceController extends Controller
             ->take(10)
             ->get(['id', 'judul', 'jenis', 'nomor', 'tahun', 'jumlah_ditanyakan']);
 
-        // Usulan Regulasi Baru dari Warga
-        $usulanRegulasiBaru = \App\Models\ClaimVerification::where('kategori_laporan', 'usul_regulasi')
-            ->orderByDesc('created_at')
-            ->take(15)
-            ->get(['id', 'klaim_text', 'catatan_laporan', 'kecamatan', 'layanan', 'created_at']);
-
         return response()->json([
             'total_interaksi' => $totalInteraksi,
             'topik_terbanyak' => $topikTerbanyak,
             'sentimen_breakdown' => $sentimenBreakdown,
             'regulasi_paling_ditanyakan' => $regulasiPalingDitanyakan,
-            'usulan_regulasi_baru' => $usulanRegulasiBaru,
         ]);
     }
 
@@ -92,7 +85,7 @@ class CivicIntelligenceController extends Controller
      * Regulatory Decay Tracker: daftar regulasi berdasar decay_score,
      * plus status closed-loop revisi terbaru kalau ada.
      */
-    public function decay(Request $request): JsonResponse
+    public function decay(Request $request, \App\Services\DecayScoreService $decayScoreService): JsonResponse
     {
         $minScore = (float) $request->input('min_score', 0);
 
@@ -100,6 +93,13 @@ class CivicIntelligenceController extends Controller
             ->where('decay_score', '>=', $minScore)
             ->orderByDesc('decay_score')
             ->paginate((int) $request->input('per_page', 15));
+
+        // Sertakan breakdown faktor (usia/frekuensi/confidence AI) per regulasi
+        // supaya UI bisa menjelaskan KENAPA skornya segitu, bukan cuma angka akhir.
+        $regulations->getCollection()->transform(function (Regulation $regulation) use ($decayScoreService) {
+            $regulation->setAttribute('decay_breakdown', $decayScoreService->calculate($regulation));
+            return $regulation;
+        });
 
         return response()->json($regulations);
     }
