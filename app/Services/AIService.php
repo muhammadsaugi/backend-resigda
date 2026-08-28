@@ -42,8 +42,7 @@ class AIService
     public function askRag(string $query, int $topK = 5): array
     {
         try {
-            $response = $this->http()->timeout(30)
-                ->retry(2, 500) // coba lagi 2x kalau timeout/gagal koneksi sesaat
+            $response = $this->http()->timeout(45)
                 ->post("{$this->baseUrl}/rag", [
                     'query' => $query,
                     'top_k' => $topK,

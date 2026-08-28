@@ -24,9 +24,9 @@ use Illuminate\Support\Facades\Route;
 // (mencegah flood cepat) dan per-hari (mencegah biaya membengkak dari script yang
 // sabar mengirim request pelan-pelan tapi terus-menerus sepanjang hari).
 Route::post('/chat', [ChatController::class, 'store'])
-    ->middleware(['throttle:10,1', 'throttle:100,1440']);
+    ->middleware(['throttle:60,1', 'throttle:1000,1440']);
 Route::post('/verify-claim', [ClaimVerificationController::class, 'store'])
-    ->middleware(['throttle:10,1', 'throttle:100,1440']);
+    ->middleware(['throttle:60,1', 'throttle:1000,1440']);
 Route::post('/verify-claim/{claimVerification}/report', [ClaimVerificationController::class, 'reportToInspektorat'])
     ->middleware('throttle:20,1');
 
