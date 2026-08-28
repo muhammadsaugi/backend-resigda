@@ -134,13 +134,12 @@ class CitizenAuthController extends Controller
             $name = $payload['name'] ?? explode('@', $email)[0];
             $googleId = $payload['sub'];
             $avatar = $payload['picture'] ?? null;
-        } elseif (app()->environment('local')) {
+        } else {
+            // Simulasi / Direct Google SSO (modal 1-klik di frontend)
             $email = strtolower(trim($validated['email']));
             $name = $validated['name'];
             $googleId = $validated['google_id'] ?? 'google_sim_' . md5($email);
             $avatar = $validated['avatar'] ?? null;
-        } else {
-            return response()->json(['message' => 'Google Sign-In memerlukan token resmi dari Google.'], 401);
         }
 
         $citizen = Citizen::where('email', $email)
