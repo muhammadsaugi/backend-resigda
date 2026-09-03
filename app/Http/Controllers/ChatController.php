@@ -47,6 +47,11 @@ class ChatController extends Controller
             ->values()
             ->all();
 
+        // Increment jumlah_ditanyakan secara real-time pada regulasi yang digunakan sebagai rujukan RAG
+        if (! empty($regulationIds)) {
+            \App\Models\Regulation::whereIn('id', $regulationIds)->increment('jumlah_ditanyakan');
+        }
+
         // PRIVACY BY DESIGN: hanya simpan session_id, topic, sentiment, regulation_ids,
         // confidence, dan timestamp. TIDAK PERNAH simpan $validated['query'] di sini.
         CivicInteraction::create([
