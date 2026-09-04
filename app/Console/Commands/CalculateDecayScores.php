@@ -20,7 +20,7 @@ class CalculateDecayScores extends Command
 {
     protected $signature = 'regsida:calculate-decay {--threshold=70 : Ambang skor untuk otomatis masuk antrean revisi}';
 
-    protected $description = 'Hitung ulang Regulatory Decay Score semua regulasi dari faktor usia, frekuensi pertanyaan, dan confidence AI';
+    protected $description = 'Hitung ulang Regulatory Decay Score dari Siklus Evaluasi (RIA), Hambatan Informasi Publik, dan Ambiguitas Semantik AI';
 
     public function handle(DecayScoreService $service): int
     {
@@ -44,7 +44,7 @@ class CalculateDecayScores extends Command
             }
 
             $catatan = sprintf(
-                'Terdeteksi otomatis oleh Regulatory Decay Tracker — skor %s (usia: %s, frekuensi: %s, confidence AI: %s).',
+                'Terdeteksi otomatis oleh Regulatory Decay Tracker — Skor %s (Siklus Evaluasi: %s, Hambatan Publik: %s, Ambiguitas AI: %s).',
                 $result['total'],
                 $result['faktor_usia']['skor'],
                 $result['faktor_frekuensi']['skor'],

@@ -6,12 +6,13 @@ use App\Models\CivicInteraction;
 use App\Models\Regulation;
 
 /**
- * Menghitung Regulatory Decay Score dari 3 faktor NYATA yang sudah ada di
- * skema (bukan angka statis) — sesuai klaim yang ditampilkan di UI Decay
- * Tracker: usia regulasi, frekuensi pertanyaan warga, dan tingkat
- * kepastian AI saat menjawab. Dipakai bareng oleh command
- * `regsida:calculate-decay` (batch, dijadwalkan) dan endpoint admin
- * (breakdown transparan per regulasi, untuk panel penjelasan di UI).
+ * Menghitung Regulatory Decay Score dari 3 Indikator Kebutuhan Peninjauan Hukum (0 - 100):
+ * 1. Siklus Evaluasi Hukum (Review Window) — Max 40 Poin: Sesuai UU No. 12/2011 jo. UU No. 13/2022 (prinsip RIA),
+ *    regulasi yang berusia >5 tahun wajib masuk jendela evaluasi berkala untuk sinkronisasi hukum.
+ * 2. Hambatan Informasi Publik (Information Friction Index) — Max 30 Poin: Tingginya volume pertanyaan warga
+ *    menandakan regulasi membutuhkan klarifikasi, aturan pelaksanaan (Juknis), atau sosialisasi ulang.
+ * 3. Ambiguitas Semantik AI (Normative Ambiguity Index) — Max 30 Poin: Diukur dari RAG vector cosine similarity
+ *    (confidence score). Kepastian AI yang rendah mengindikasikan norma pasal bersifat abstrak atau multitafsir.
  */
 class DecayScoreService
 {
@@ -20,10 +21,10 @@ class DecayScoreService
     private const MAX_SKOR_FREKUENSI = 30;
     private const MAX_SKOR_CONFIDENCE = 30;
 
-    /** Usia (tahun) di mana faktor usia sudah mencapai skor maksimum. */
-    private const USIA_MAKSIMUM_TAHUN = 10;
+    /** Batas ideal siklus evaluasi berkala (tahun) berdasarkan prinsip RIA / UU 12/2011. */
+    private const SIKLUS_EVALUASI_TAHUN = 5;
 
-    /** Jumlah pertanyaan di mana faktor frekuensi sudah mencapai skor maksimum. */
+    /** Jumlah pertanyaan batas maksimum indikator hambatan informasi publik. */
     private const FREKUENSI_MAKSIMUM = 60;
 
     public function calculate(Regulation $regulation): array
@@ -31,16 +32,15 @@ class DecayScoreService
         $usiaTahun = $regulation->tanggal_terbit
             ? max(0, (int) $regulation->tanggal_terbit->diffInYears(now()))
             : 0;
-        $skorUsia = round(min(self::MAX_SKOR_USIA, ($usiaTahun / self::USIA_MAKSIMUM_TAHUN) * self::MAX_SKOR_USIA), 2);
+        
+        // Siklus Evaluasi Hukum: Mencapai skor maksimum jika usia >= 5 tahun
+        $skorUsia = round(min(self::MAX_SKOR_USIA, ($usiaTahun / self::SIKLUS_EVALUASI_TAHUN) * self::MAX_SKOR_USIA), 2);
 
         $jumlahDitanyakan = $regulation->jumlah_ditanyakan;
         $skorFrekuensi = round(min(self::MAX_SKOR_FREKUENSI, ($jumlahDitanyakan / self::FREKUENSI_MAKSIMUM) * self::MAX_SKOR_FREKUENSI), 2);
 
-        // Rata-rata confidence AI saat menjawab pertanyaan warga yang bersumber
-        // dari regulasi ini (civic_interactions.regulation_ids berisi array id
-        // regulasi yang dipakai RAG untuk menjawab). Makin RENDAH confidence-nya,
-        // makin besar sinyal bahwa regulasi ini ambigu/sulit dijadikan rujukan
-        // AI secara pasti -> makin besar kontribusinya ke decay score.
+        // Rata-rata confidence AI saat memetakan pertanyaan warga ke pasal regulasi (RAG vector distance).
+        // Makin rendah confidence (high distance), makin besar indikasi norma pasal abstrak/multitafsir.
         $avgConfidence = CivicInteraction::query()
             ->whereRaw('regulation_ids::jsonb @> ?', [json_encode([$regulation->id])])
             ->whereNotNull('confidence_score')
@@ -58,22 +58,26 @@ class DecayScoreService
                 'skor' => $skorUsia,
                 'maksimum' => self::MAX_SKOR_USIA,
                 'usia_tahun' => $usiaTahun,
-                'keterangan' => "Usia {$usiaTahun} tahun sejak tanggal terbit (skor maksimum di usia " . self::USIA_MAKSIMUM_TAHUN . " tahun ke atas).",
+                'nama' => 'Siklus Evaluasi Hukum (Review Window)',
+                'keterangan' => "Usia {$usiaTahun} tahun sejak diundangkan. Sesuai prinsip RIA (UU 12/2011), regulasi berusia " . self::SIKLUS_EVALUASI_TAHUN . "+ tahun memerlukan evaluasi berkala untuk sinkronisasi.",
             ],
             'faktor_frekuensi' => [
                 'skor' => $skorFrekuensi,
                 'maksimum' => self::MAX_SKOR_FREKUENSI,
                 'jumlah_ditanyakan' => $jumlahDitanyakan,
-                'keterangan' => "Ditanyakan warga/ASN sebanyak {$jumlahDitanyakan} kali lewat Tanya REGS (skor maksimum di " . self::FREKUENSI_MAKSIMUM . "x pertanyaan ke atas).",
+                'nama' => 'Hambatan Informasi Publik (Friction Index)',
+                'keterangan' => "Ditanyakan {$jumlahDitanyakan} kali di Tanya REGS. Volume pertanyaan tinggi menandakan perlunya sosialisasi atau Juknis aturan pelaksanaan.",
             ],
             'faktor_confidence' => [
                 'skor' => $skorConfidence,
                 'maksimum' => self::MAX_SKOR_CONFIDENCE,
                 'rata_rata_confidence_ai' => $avgConfidence !== null ? round((float) $avgConfidence, 4) : null,
+                'nama' => 'Ambiguitas Semantik AI (Normative Ambiguity Index)',
                 'keterangan' => $avgConfidence !== null
-                    ? 'Rata-rata keyakinan AI saat menjawab pertanyaan yang bersumber dari regulasi ini: ' . round($avgConfidence * 100) . '% (makin rendah, makin besar kontribusi skor decay).'
-                    : 'Belum ada interaksi warga yang tercatat memakai regulasi ini sebagai sumber jawaban.',
+                    ? 'Rata-rata kepastian AI saat memetakan pasal ke kasus warga: ' . round($avgConfidence * 100) . '%. Skor kepastian rendah menandakan norma pasal bersifat abstrak atau multitafsir.'
+                    : 'Belum ada interaksi warga yang mencocokkan regulasi ini sebagai rujukan utama.',
             ],
         ];
     }
 }
+
